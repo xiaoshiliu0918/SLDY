@@ -199,6 +199,8 @@ awemeBaseViewController 上的同名字段
 | 视频 | `downloadURL` → `downloadAddr` → `playURL` → `playAddr` → `h264URL` → `h264DownloadURL` → `playLowBitURL` → `playAddrH264` → `endWatermarkDownloadURL` → `miscDownloadAddrs` |
 | 图文 | `downloadableAlbumImages` → `originalAlbumImages` → `images` → `imageInfos` → `albumImages` |
 
+- **`AWEURLModel` 的 getter 是 `URLList`（大写 URL）**，KVC 大小写敏感，写成 `urlList` 会一直取到 nil
+- 命名对不上时还有一层兜底：按属性名递归翻找含 `.mp4` / `/video/tos/` / `playwm` 的地址，封面图之类的会被过滤掉
 - `playwm` 域名替换成 `play` —— 这是去水印的关键
 - URL 提取走通用递归器，兼容 `NSString` / `NSURL` / 数组 / 字典 / `urlList` 模型
 - 下载带 iPhone UA 与 `Referer`，避免 CDN 403
@@ -279,6 +281,12 @@ python tools/grep_methods.py AwemeLiteCore keyword...          # 全量搜方法
 ---
 
 ## 更新记录
+
+### 1.5.1
+
+- 修复无水印保存提示「没拿到无水印地址」：`AWEURLModel` 的地址列表 getter 是 `URLList`，之前按 `urlList` 取（KVC 大小写敏感）永远拿不到
+- 增加深层扫描兜底：字段名对不上时按属性名递归查找视频地址
+- 失败提示带上作品模型的类名，便于定位
 
 ### 1.5.0
 

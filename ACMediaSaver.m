@@ -2,6 +2,7 @@
 #import "ACUtils.h"
 #import "ACConfig.h"
 #import "ACLog.h"
+#import <objc/runtime.h>
 
 static void ACCollectViewsForModel(UIView *root, NSMutableArray<UIView *> *out, NSUInteger depth);
 
@@ -111,11 +112,67 @@ static NSString *ACFirstURL(id object) {
         return nil;
     }
 
-    for (NSString *key in @[@"urlList", @"url_list", @"urls", @"url", @"src", @"uri", @"Uri"]) {
+    // AWEURLModel 的 getter 是 URLList（大写 URL），KVC 大小写敏感，少一个字母都取不到
+    for (NSString *key in @[@"URLList", @"urlList", @"url_list", @"originURLList",
+                            @"urls", @"url", @"src", @"Uri", @"URI"]) {
         NSString *url = ACFirstURL(ACSafeValue(object, key));
         if (url.length) return url;
     }
     return nil;
+}
+
+/// 判断是不是视频地址：封面图之类一律排除
+static BOOL ACIsVideoURL(NSString *url) {
+    if (![url isKindOfClass:[NSString class]] || ![url hasPrefix:@"http"]) return NO;
+    NSString *lower = url.lowercaseString;
+    return [lower containsString:@".mp4"] ||
+           [lower containsString:@"/video/tos/"] ||
+           [lower containsString:@"/aweme/v1/play"] ||
+           [lower containsString:@"bytevc"] ||
+           [lower containsString:@"playwm"];
+}
+
+/// 兜底：按属性名递归翻找视频地址，不依赖具体字段命名
+static NSString *ACDeepVideoURL(id object, NSUInteger depth, NSMutableSet<NSString *> *seen) {
+    if (!object || depth > 4) return nil;
+
+    if ([object isKindOfClass:[NSString class]]) {
+        return ACIsVideoURL(object) ? object : nil;
+    }
+    if ([object isKindOfClass:[NSURL class]]) {
+        NSString *text = [(NSURL *)object absoluteString];
+        return ACIsVideoURL(text) ? text : nil;
+    }
+    if ([object isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)object) {
+            NSString *url = ACDeepVideoURL(item, depth + 1, seen);
+            if (url.length) return url;
+        }
+        return nil;
+    }
+    if ([object isKindOfClass:[NSDictionary class]]) {
+        for (id value in [(NSDictionary *)object allValues]) {
+            NSString *url = ACDeepVideoURL(value, depth + 1, seen);
+            if (url.length) return url;
+        }
+        return nil;
+    }
+
+    NSString *mark = [NSString stringWithFormat:@"%p", object];
+    if ([seen containsObject:mark]) return nil;
+    [seen addObject:mark];
+
+    unsigned int count = 0;
+    objc_property_t *props = class_copyPropertyList([object class], &count);
+    NSString *found = nil;
+    for (unsigned int i = 0; i < count && !found; i++) {
+        NSString *name = @(property_getName(props[i]));
+        id value = ACSafeValue(object, name);
+        if (!value) continue;
+        found = ACDeepVideoURL(value, depth + 1, seen);
+    }
+    if (props) free(props);
+    return found;
 }
 
 /// 无水印视频地址。
@@ -136,6 +193,12 @@ static NSString *ACVideoDownloadURL(id model) {
         // playwm 是带水印的播放地址，换成 play 就是无水印
         url = [url stringByReplacingOccurrencesOfString:@"playwm" withString:@"play"];
         return url;
+    }
+
+    // 字段名对不上时，按属性名递归翻一遍
+    NSString *deep = ACDeepVideoURL(video, 0, [NSMutableSet set]);
+    if (deep.length) {
+        return [deep stringByReplacingOccurrencesOfString:@"playwm" withString:@"play"];
     }
     return nil;
 }
@@ -179,7 +242,10 @@ static NSArray<NSString *> *ACImageDownloadURLs(id model) {
     } else {
         NSString *url = ACVideoDownloadURL(model);
         if (url.length == 0) {
-            if (completion) completion(@"没拿到无水印地址");
+            if (completion) {
+                completion([NSString stringWithFormat:@"没拿到无水印地址（%@）",
+                            model ? NSStringFromClass([model class]) : @"nil"]);
+            }
             return;
         }
         [self saveVideo:url completion:completion];
