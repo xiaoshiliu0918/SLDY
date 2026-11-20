@@ -5,6 +5,8 @@
 #import <objc/runtime.h>
 #import <math.h>
 
+static void ACCollectViews(UIView *root, NSMutableArray<UIView *> *out, NSUInteger depth);
+
 #pragma mark - 悬浮层级窗口
 
 /// 根视图：只有真正命中子视图时才响应触摸，避免整块透明窗口吃掉 App 的手势
@@ -108,6 +110,42 @@ void ACSetCurrentInteractionVC(UIViewController *vc) {
 
 UIViewController *ACCurrentInteractionVC(void) {
     return gInteractionVC;
+}
+
+/// 屏幕上真正看得见的那条。
+/// 自动连播翻页时会有多个交互容器轮流出现，只按 viewDidAppear 记指针会停在错误的那条上，
+/// 所以这里按几何位置判断：屏幕中心落在谁的 view 里，谁就是当前视频。
+UIViewController *ACVisibleInteractionVC(void) {
+    Class target = NSClassFromString(@"AWEPlayInteractionViewController");
+    UIWindow *key = ACKeyWindow();
+    if (!target || !key) return nil;
+
+    NSMutableArray<UIView *> *views = [NSMutableArray array];
+    if (key.rootViewController.view) ACCollectViews(key.rootViewController.view, views, 0);
+
+    CGPoint center = CGPointMake(CGRectGetMidX(key.bounds), CGRectGetMidY(key.bounds));
+    UIViewController *best = nil;
+    CGFloat bestScore = -1;
+
+    for (UIView *v in views) {
+        id responder = v.nextResponder;
+        if (![responder isKindOfClass:target]) continue;
+        if (v.hidden || v.alpha < 0.05 || !v.window) continue;
+
+        CGRect rect = [v convertRect:v.bounds toView:key];
+        CGRect visible = CGRectIntersection(rect, key.bounds);
+        CGFloat height = CGRectIsNull(visible) ? 0 : CGRectGetHeight(visible);
+        if (height <= 1) continue;
+
+        // 命中屏幕中心的一律优先，其次比露出高度
+        BOOL containsCenter = CGRectContainsPoint(rect, center);
+        CGFloat score = height + (containsCenter ? 1e7 : 0);
+        if (score > bestScore) {
+            bestScore = score;
+            best = (UIViewController *)responder;
+        }
+    }
+    return best;
 }
 
 static void ACCollectViewControllers(UIViewController *vc, NSMutableArray<UIViewController *> *out, NSUInteger depth) {
@@ -333,31 +371,45 @@ void ACNoteAweme(id model) {
 }
 
 id ACCurrentAweme(void) {
-    // 1) 交互容器上的 awemeModel 最贴近「正在播的这条」
-    //    （注意不是 model，那个字段不是作品）
-    UIViewController *vc = ACCurrentInteractionVC();
+    // 以「屏幕上真正看得见的那条」为准：自动连播翻页后回滑，指针会停在错误的容器上，
+    // 只有按几何位置命中才可靠。
+    UIViewController *vc = ACVisibleInteractionVC();
+    if (!vc) vc = ACCurrentInteractionVC();
     if (!vc) vc = ACFindVCByClassName(@"AWEPlayInteractionViewController");
 
-    id model = ACSafeValue(vc, @"awemeModel");
-    if (ACLooksLikeAweme(model)) {
-        gAwemeModel = model;
-        return model;
+    // 1) 容器自己持有的作品字段（model 不是作品，别放进来）
+    for (NSString *key in @[@"awemeModel", @"aweme"]) {
+        id model = ACSafeValue(vc, key);
+        if (ACLooksLikeAweme(model)) {
+            gAwemeModel = model;
+            return model;
+        }
     }
 
-    // 2) setModel: 时缓存下来的那份
-    //    cell 预加载可能写进相邻作品，所以排在实时字段之后
-    id cached = gAwemeModel;
-    if (ACLooksLikeAweme(cached)) return cached;
+    // 2) 容器的 viewModel 里可能挂着作品
+    id viewModel = ACSafeValue(vc, @"viewModel");
+    for (NSString *key in @[@"model", @"awemeModel", @"aweme"]) {
+        id model = ACSafeValue(viewModel, key);
+        if (ACLooksLikeAweme(model)) {
+            gAwemeModel = model;
+            return model;
+        }
+    }
 
     // 3) 播放基类上的同名字段
     id base = ACSafeValue(vc, @"awemeBaseViewController");
     for (NSString *key in @[@"awemeModel", @"model", @"aweme"]) {
-        id candidate = ACSafeValue(base, key);
-        if (ACLooksLikeAweme(candidate)) {
-            gAwemeModel = candidate;
-            return candidate;
+        id model = ACSafeValue(base, key);
+        if (ACLooksLikeAweme(model)) {
+            gAwemeModel = model;
+            return model;
         }
     }
+
+    // 4) 最后才用 setModel: 缓存（cell 预加载可能写的是相邻作品）
+    id cached = gAwemeModel;
+    if (ACLooksLikeAweme(cached)) return cached;
+
     return nil;
 }
 

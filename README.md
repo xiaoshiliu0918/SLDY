@@ -178,10 +178,20 @@ AWEPlayInteractionSpeedController -changeSpeed:(double)
 
 ### 无水印保存
 
-取作品模型按可信度排序，并且**校验它确实是作品**（响应 `video` / `images` / `awemeId` 之一），避免拿到同名的别的对象：
+取作品模型按可信度排序，并且**校验它确实是作品**（响应 `video` / `images` / `awemeId` 之一），避免拿到同名的别的对象。
+
+第一步先确定「哪一条才是当前视频」：自动连播翻页时会有多个交互容器轮流 `viewDidAppear`，
+只记指针会停在下一条上（回滑到上一条去保存，存下来的却是下一条）。所以按几何位置判断 ——
+屏幕中心落在谁的 `view` 里，谁就是当前这条：
+
+```objc
+UIViewController *vc = ACVisibleInteractionVC();
+```
+
+之后才是字段：
 
 ```
-AWEPlayInteractionViewController -awemeModel     ← 正在播的这条
+可见容器 -awemeModel                              ← 正在播的这条
         ↓
 setModel: 时缓存的模型                            ← hook 里存下来的
         ↓
@@ -281,6 +291,11 @@ python tools/grep_methods.py AwemeLiteCore keyword...          # 全量搜方法
 ---
 
 ## 更新记录
+
+### 1.5.2
+
+- 修复「回滑到上一条保存，存下来的却是下一条」：当前作品改为按屏幕中心命中的交互容器判断，不再依赖 `viewDidAppear` 记的指针
+- 取模型顺序重排：可见容器 → 容器 `viewModel` → 播放基类 → `setModel:` 缓存
 
 ### 1.5.1
 

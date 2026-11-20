@@ -16,6 +16,9 @@ UIWindow * _Nullable ACCreateOverlayWindow(UIWindowLevel level);
 UIViewController * _Nullable ACCurrentInteractionVC(void);
 void ACSetCurrentInteractionVC(UIViewController * _Nullable vc);
 
+/// 屏幕上真正看得见的那条视频的交互容器（按屏幕中心命中判断，回滑后依然准确）
+UIViewController * _Nullable ACVisibleInteractionVC(void);
+
 /// 按类名在控制器树里查找
 UIViewController * _Nullable ACFindVCByClassName(NSString *className);
 
