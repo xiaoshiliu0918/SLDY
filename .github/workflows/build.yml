@@ -1,0 +1,37 @@
+name: build-tweak
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Theos + iOS SDK
+        run: |
+          set -e
+          export THEOS=$RUNNER_TEMP/theos
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          curl -L -o /tmp/sdks.zip https://github.com/theos/sdks/archive/refs/heads/master.zip
+          unzip -q /tmp/sdks.zip -d /tmp
+          mkdir -p "$THEOS/sdks"
+          cp -R /tmp/sdks-master/iPhoneOS*.sdk "$THEOS/sdks/" || true
+          ls "$THEOS/sdks"
+
+      - name: 编译
+        run: |
+          set -e
+          make clean || true
+          make FINALPACKAGE=1
+          find .theos -name "*.dylib" -exec ls -lh {} \;
+
+      - name: 上传 dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: AwemeLitePlus-dylib
+          path: .theos/obj/**/*.dylib
+          if-no-files-found: error
