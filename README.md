@@ -191,11 +191,13 @@ UIViewController *vc = ACVisibleInteractionVC();
 之后才是字段：
 
 ```
-可见容器 -awemeModel                              ← 正在播的这条
+可见容器 -awemeModel / -aweme                     ← 正在播的这条
         ↓
-setModel: 时缓存的模型                            ← hook 里存下来的
+可见容器 -viewModel 上挂的作品
         ↓
 awemeBaseViewController 上的同名字段
+        ↓
+setModel: 时缓存的模型                            ← 预加载可能写的是相邻作品，放最后
         ↓
 视图树反查宿主控制器
 ```
