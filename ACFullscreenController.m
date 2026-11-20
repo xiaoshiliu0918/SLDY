@@ -1,6 +1,7 @@
 #import "ACFullscreenController.h"
 #import "ACUtils.h"
 #import "ACConfig.h"
+#import "ACFloatingBall.h"
 #import "ACLog.h"
 #import <objc/message.h>
 #import <math.h>
@@ -157,6 +158,11 @@
     UITapGestureRecognizer *gesture =
         [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleExitGesture:)];
     gesture.numberOfTouchesRequired = 2;
+
+    // 悬浮球的显隐也是二指双击，单指/双指轻点必须等它失败再触发，
+    // 否则全屏时想隐藏悬浮球会顺手把全屏也退掉
+    UITapGestureRecognizer *toggle = [ACFloatingBall shared].toggleTap;
+    if (toggle) [gesture requireGestureRecognizerToFail:toggle];
     gesture.cancelsTouchesInView = NO;
     [key addGestureRecognizer:gesture];
     self.exitGesture = gesture;

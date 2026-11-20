@@ -38,7 +38,7 @@ static NSString *ACRateText(double value) {
 @property (nonatomic, strong) UIButton *saveButton;
 @property (nonatomic, strong) UISwitch *autoPlaySwitch;
 @property (nonatomic, strong) UITapGestureRecognizer *dismissTap;
-@property (nonatomic, strong) UITapGestureRecognizer *tripleDoubleTap;
+@property (nonatomic, strong) UITapGestureRecognizer *toggleTap;
 @property (nonatomic, assign) BOOL panelOpen;
 @property (nonatomic, assign) CGPoint ballCenter;
 @property (nonatomic, assign) CGPoint dragOffset;
@@ -112,8 +112,8 @@ static NSString *ACRateText(double value) {
         return;
     }
 
-    // 三指双击关掉之后，页面切换也不能把它弹回来
-    [self ensureTripleTapGesture];
+    // 二指双击关掉之后，页面切换也不能把它弹回来
+    [self ensureToggleGesture];
 
     if (![ACConfig shared].ballVisible) {
         if (self.window) self.window.hidden = YES;
@@ -153,29 +153,29 @@ static NSString *ACRateText(double value) {
 }
 
 
-#pragma mark - 三指双击显隐
+#pragma mark - 二指双击显隐
 
-- (void)ensureTripleTapGesture {
+- (void)ensureToggleGesture {
     if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [self ensureTripleTapGesture]; });
+        dispatch_async(dispatch_get_main_queue(), ^{ [self ensureToggleGesture]; });
         return;
     }
     UIWindow *key = ACKeyWindow();
     if (!key) return;
-    if (self.tripleDoubleTap && self.tripleDoubleTap.view == key) return;
+    if (self.toggleTap && self.toggleTap.view == key) return;
 
-    if (self.tripleDoubleTap) {
-        [self.tripleDoubleTap.view removeGestureRecognizer:self.tripleDoubleTap];
+    if (self.toggleTap) {
+        [self.toggleTap.view removeGestureRecognizer:self.toggleTap];
     }
 
     UITapGestureRecognizer *gesture =
-        [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTripleDoubleTap:)];
-    gesture.numberOfTouchesRequired = 3;   // 三指
+        [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleToggleTap:)];
+    gesture.numberOfTouchesRequired = 2;   // 二指
     gesture.numberOfTapsRequired = 2;      // 双击
     gesture.cancelsTouchesInView = NO;     // 不干扰 App 自己的手势
     gesture.delegate = self;
     [key addGestureRecognizer:gesture];
-    self.tripleDoubleTap = gesture;
+    self.toggleTap = gesture;
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
@@ -183,7 +183,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     return YES;
 }
 
-- (void)handleTripleDoubleTap:(UITapGestureRecognizer *)gesture {
+- (void)handleToggleTap:(UITapGestureRecognizer *)gesture {
     if (gesture.state != UIGestureRecognizerStateEnded) return;
     [self toggleVisibility];
 }
@@ -209,7 +209,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
         if (self.panelOpen) [self closePanel];
         [self removeDismissTap];
         self.window.hidden = YES;
-        ACLog(@"悬浮球已隐藏，三指双击恢复");
+        ACLog(@"悬浮球已隐藏，二指双击恢复");
     }
 }
 

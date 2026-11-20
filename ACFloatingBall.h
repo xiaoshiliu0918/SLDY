@@ -7,6 +7,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (instancetype)shared;
 
+/// 二指双击手势（挂在 App keyWindow 上，全屏退出需要和它做互斥）
+@property (nonatomic, strong, readonly, nullable) UITapGestureRecognizer *toggleTap;
+
 - (void)showIfNeeded;
 - (void)hide;
 - (void)refreshSpeed;
