@@ -86,7 +86,6 @@ static NSString *const kACAutoPlay = @"ACAutoPlay";
     [ud setDouble:_ballPosition.y forKey:kACBallY];
     [ud setBool:_ballCollapsed forKey:kACBallCollapsed];
     [ud setBool:_autoPlayEnabled forKey:kACAutoPlay];
-    [ud synchronize];
 }
 
 @end

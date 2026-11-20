@@ -14,6 +14,7 @@ static void ACCollectViewsForModel(UIView *root, NSMutableArray<UIView *> *out, 
 @property (nonatomic, assign) NSInteger imageFailure;
 @property (nonatomic, strong) NSArray<NSString *> *pendingImageURLs;
 @property (nonatomic, assign) NSInteger imageIndex;
+@property (nonatomic, copy) NSString *pendingVideoPath;
 @end
 
 /// 下载请求统一带上 iPhone UA 与 Referer，否则 CDN 会直接 403
@@ -285,6 +286,7 @@ static NSArray<NSString *> *ACImageDownloadURLs(id model) {
             }
 
             dispatch_async(dispatch_get_main_queue(), ^{
+                self.pendingVideoPath = path;
                 UISaveVideoAtPathToSavedPhotosAlbum(path, self,
                     @selector(video:didFinishSavingWithError:contextInfo:), NULL);
             });
@@ -298,6 +300,12 @@ static NSArray<NSString *> *ACImageDownloadURLs(id model) {
 }
 
 - (void)finishVideoWithMessage:(NSString *)message {
+    // 存完就把临时文件删掉，避免 tmp 里堆一堆 mp4
+    if (self.pendingVideoPath) {
+        [[NSFileManager defaultManager] removeItemAtPath:self.pendingVideoPath error:nil];
+        self.pendingVideoPath = nil;
+    }
+
     void (^completion)(NSString *) = self.videoCompletion;
     self.videoCompletion = nil;
     dispatch_async(dispatch_get_main_queue(), ^{

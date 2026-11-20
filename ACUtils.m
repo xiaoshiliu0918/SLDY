@@ -120,10 +120,23 @@ UIViewController *ACVisibleInteractionVC(void) {
     UIWindow *key = ACKeyWindow();
     if (!target || !key) return nil;
 
+    CGPoint center = CGPointMake(CGRectGetMidX(key.bounds), CGRectGetMidY(key.bounds));
+
+    // 快路径：指针指向的容器如果确实盖住屏幕中心，直接返回，不做任何遍历。
+    // 绝大多数场景（正常上下滑、刚进页面）走的就是这里。
+    UIViewController *current = ACCurrentInteractionVC();
+    if (current && [current isKindOfClass:target]) {
+        UIView *view = current.view;
+        if (view && view.window && !view.hidden && view.alpha >= 0.05) {
+            CGRect rect = [view convertRect:view.bounds toView:key];
+            if (CGRectContainsPoint(rect, center)) return current;
+        }
+    }
+
+    // 慢路径：自动连播后回滑等指针失准的情况，遍历视图树按几何位置找
     NSMutableArray<UIView *> *views = [NSMutableArray array];
     if (key.rootViewController.view) ACCollectViews(key.rootViewController.view, views, 0);
 
-    CGPoint center = CGPointMake(CGRectGetMidX(key.bounds), CGRectGetMidY(key.bounds));
     UIViewController *best = nil;
     CGFloat bestScore = -1;
 
@@ -224,19 +237,50 @@ UIView *ACViewByClassName(UIView *root, NSString *className) {
 
 UIView *ACCurrentPlayerView(void) {
     UIViewController *vc = ACCurrentInteractionVC();
-    if (!vc) vc = ACFindVCByClassName(@"AWEPlayInteractionViewController");
+    if (!vc) vc = ACVisibleInteractionVC();
 
     UIView *candidate = ACSafeValue(vc, @"playerView");
     if ([candidate isKindOfClass:[UIView class]] && candidate.window &&
         candidate.bounds.size.width > 1 && candidate.bounds.size.height > 1) {
         return candidate;
     }
+    if (!vc) vc = ACFindVCByClassName(@"AWEPlayInteractionViewController");
+    candidate = ACSafeValue(vc, @"playerView");
+    if ([candidate isKindOfClass:[UIView class]] && candidate.window &&
+        candidate.bounds.size.width > 1 && candidate.bounds.size.height > 1) {
+        return candidate;
+    }
 
-    UIView *root = ACKeyWindow();
-    UIView *v = ACViewByClassName(root, @"DemaciaPlayerView");
-    if (!v) v = ACViewByClassName(root, @"PlayerView");
-    if (!v) v = ACViewByClassName(root, @"VideoView");
-    return v;
+    // 兜底：一次遍历里按优先级挑，不再为三个类名各扫一遍
+    UIWindow *key = ACKeyWindow();
+    if (!key || !key.rootViewController.view) return nil;
+
+    NSMutableArray<UIView *> *all = [NSMutableArray array];
+    ACCollectViews(key.rootViewController.view, all, 0);
+
+    UIView *best = nil;
+    CGFloat bestScore = 0;
+    for (UIView *v in all) {
+        NSString *name = NSStringFromClass(v.class);
+        CGFloat rank = 0;
+        if ([name containsString:@"DemaciaPlayerView"]) rank = 3;
+        else if ([name containsString:@"PlayerView"]) rank = 2;
+        else if ([name containsString:@"VideoView"]) rank = 1;
+        if (rank <= 0) continue;
+        if (v.hidden || v.alpha < 0.05 || !v.window) continue;
+
+        CGRect rect = [v convertRect:v.bounds toView:key];
+        CGFloat area = rect.size.width * rect.size.height;
+        if (!isfinite(area) || area <= 0) continue;
+
+        // 类名优先级为主，面积次之
+        CGFloat score = rank * 1e9 + area;
+        if (score > bestScore) {
+            bestScore = score;
+            best = v;
+        }
+    }
+    return best;
 }
 
 #pragma mark - 安全消息发送
@@ -285,20 +329,27 @@ BOOL ACCallWithDouble(id obj, SEL sel, double value) {
     NSMethodSignature *signature = [obj methodSignatureForSelector:sel];
     if (!signature || signature.numberOfArguments < 3) return NO;
 
+    const char *type = [signature getArgumentTypeAtIndex:2];
+
+    // 热点：倍速接口全是 double/float，直接走 ABI，省掉 NSInvocation 的对象分配
+    if (type[0] == 'd' || type[0] == 'f') {
+        @try {
+            if (type[0] == 'd') {
+                ((void (*)(id, SEL, double))objc_msgSend)(obj, sel, value);
+            } else {
+                ((void (*)(id, SEL, float))objc_msgSend)(obj, sel, (float)value);
+            }
+            return YES;
+        } @catch (NSException *e) {
+            return NO;
+        }
+    }
+
     NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
     invocation.target = obj;
     invocation.selector = sel;
 
-    const char *type = [signature getArgumentTypeAtIndex:2];
     switch (type[0]) {
-        case 'd':
-            [invocation setArgument:&value atIndex:2];
-            break;
-        case 'f': {
-            float f = (float)value;
-            [invocation setArgument:&f atIndex:2];
-            break;
-        }
         case '@': {
             NSNumber *number = @(value);
             [invocation setArgument:&number atIndex:2];
@@ -445,6 +496,8 @@ void ACNoteSpeedManager(id manager) {
 void ACNoteEngine(id engine) {
     if (!engine) return;
     ACEnsureRegistries();
+    // 已经在表里就直接返回，避免每次起播都进一次锁
+    if ([gEngines containsObject:engine]) return;
     @synchronized (gEngines) {
         [gEngines addObject:engine];
     }
@@ -518,12 +571,19 @@ BOOL ACApplySpeed(double rate) {
     ACSetDesiredSpeed(rate);
     ACEnsureRegistries();
 
+    static SEL setRateSel, setSpeedSel, changeSpeedSel, setCurrentSpeedSel;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        setRateSel = NSSelectorFromString(@"setPlaybackRate:");
+        setSpeedSel = NSSelectorFromString(@"setPlaybackSpeed:");
+        changeSpeedSel = NSSelectorFromString(@"changeSpeed:");
+        setCurrentSpeedSel = NSSelectorFromString(@"setCurrentSpeed:");
+    });
+
     BOOL wasApplying = gSpeedApplying;
     gSpeedApplying = YES;
 
     BOOL applied = NO;
-    SEL setRateSel = NSSelectorFromString(@"setPlaybackRate:");
-    SEL setSpeedSel = NSSelectorFromString(@"setPlaybackSpeed:");
 
     id player = ACPlayerControllerForCurrentVideo();
     if (player) applied = ACCallWithDouble(player, setRateSel, rate) || applied;
@@ -538,13 +598,13 @@ BOOL ACApplySpeed(double rate) {
 
     if (!applied) {
         id controller = gSpeedController;
-        if (controller) applied = ACCallWithDouble(controller, NSSelectorFromString(@"changeSpeed:"), rate);
+        if (controller) applied = ACCallWithDouble(controller, changeSpeedSel, rate);
     }
 
     // 同步 App 自己的倍速状态，保证切集/滑动时 App 主动把速率设成同一值
     id manager = ACSpeedManager();
     if (manager) {
-        ACCallWithObject(manager, NSSelectorFromString(@"setCurrentSpeed:"), @(rate));
+        ACCallWithObject(manager, setCurrentSpeedSel, @(rate));
         applied = YES;
     }
 
